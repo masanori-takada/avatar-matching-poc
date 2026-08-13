@@ -23,6 +23,24 @@
 - [`docs/05-ai-pipeline.md`](docs/05-ai-pipeline.md) — AIパイプライン(ペルソナ生成・会話生成・相性評価)
 - [`docs/06-implementation-plan.md`](docs/06-implementation-plan.md) — 実装計画・フェーズ分割・レビュー観点
 
+## 今後の開発フロー(spec-kit)
+
+`docs/00〜06` は本リポジトリの最初の実装を進めるために手動で書いた設計ドキュメントです。これ以降の機能追加・変更は、[GitHub spec-kit](https://github.com/github/spec-kit) の spec-driven workflow に沿って進めます。`specify init --here --integration claude` により `.specify/` と `.claude/skills/speckit-*` を導入済みです。
+
+プロジェクト全体の不変の原則(匿名性はRLSで担保する、辞退は相手から推測できないようにする、人事・運営は閲覧できない、Claude API はオプショナル、等)は [`.specify/memory/constitution.md`](.specify/memory/constitution.md) に明文化されています。新機能を追加する際は、まずこの Constitution に抵触しないかを確認してください。
+
+典型的な流れ:
+
+```
+/speckit-specify   新機能のベースライン仕様を作成
+/speckit-clarify    (任意)曖昧な点を対話的に解消
+/speckit-plan       実装計画を作成
+/speckit-tasks      実行可能なタスクへ分解
+/speckit-implement  実装を実行
+```
+
+実装後は、本 Constitution の原則(特に匿名性・非対称性・非閲覧)への抵触を主眼に、実装とは独立した観点でコードレビューを行ってください(`docs/06-implementation-plan.md` §3 の観点表を参照)。
+
 ## 技術スタック
 
 - [Next.js](https://nextjs.org/) 15(App Router, Server Actions, Server Components)
