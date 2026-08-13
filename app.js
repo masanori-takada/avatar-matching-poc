@@ -11,6 +11,11 @@
 
   var STORAGE_KEY = 'avatarMatchingDemo.v1';
 
+  // true: ページ読み込みのたびに保存済みの進捗を破棄し、招待コード入力画面から始める。
+  // 不特定多数に共有するデモでは、前の人の回答が次の人に見えないようこちらを使う。
+  // false にすると、リロードしても続きから再開できる(設計書 §7 の本来の永続化仕様)。
+  var RESET_ON_LOAD = true;
+
   // インタビュー設問(選択式4問+自由記述2問)
   var QUESTIONS = [
     { id: 'q1', type: 'choice', text: '休日の過ごし方に近いのはどちらですか?',
@@ -128,6 +133,14 @@
   }
 
   function loadState() {
+    // 共有デモ用の挙動: ページを読み込むたびに必ず招待コード入力画面から始める。
+    // 前の人の回答や進捗が次の人に見えてしまうのを防ぐため、保存済みの状態は
+    // 読み込まずに破棄する(画面遷移中の保存は行われるが、リロードで消える)。
+    if (RESET_ON_LOAD) {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e0) { /* 無視 */ }
+      return clone(INITIAL_STATE);
+    }
+
     var raw = null;
     try {
       raw = localStorage.getItem(STORAGE_KEY);
