@@ -1,0 +1,190 @@
+# AIアバター自動マッチング
+
+社員同士をAIアバター(あなたの代わりに会話するAI人格)でマッチングし、相性が高いペアにのみ実名を開示して面談を促すマッチングアプリの本番実装です。
+
+## poc/ との関係
+
+`poc/` ディレクトリには、`localStorage` のみで動く単一ページのモック(`index.html` + `app.js` + `style.css`)が入っています。本リポジトリの `src/` は、そのモックの画面構成・文言・デザインをそのまま踏襲しつつ、以下を本番相当に置き換えた実装です。
+
+- データの保存先: `localStorage` → Supabase(Postgres + RLS)
+- 認証: なし → メールOTP(Supabase Auth)
+- 相手アバターの応答: 固定スクリプト → Claude API(未設定時は決定的フォールバック)
+- 匿名性の担保: JS側のフラグ → Postgres の Row Level Security
+
+`poc/` 配下のファイルは本実装からは変更していません。画面の文言や振る舞いのリファレンスとして参照してください。
+
+設計ドキュメントは `docs/` 配下にあります。
+
+- [`docs/00-overview.md`](docs/00-overview.md) — 全体概要
+- [`docs/01-requirements.md`](docs/01-requirements.md) — 要件定義(FR/NFR/受け入れ基準)
+- [`docs/02-architecture.md`](docs/02-architecture.md) — アーキテクチャ
+- [`docs/03-data-model.md`](docs/03-data-model.md) — データモデルとRLS
+- [`docs/04-api-contract.md`](docs/04-api-contract.md) — Server Action / Route Handler の契約
+- [`docs/05-ai-pipeline.md`](docs/05-ai-pipeline.md) — AIパイプライン(ペルソナ生成・会話生成・相性評価)
+- [`docs/06-implementation-plan.md`](docs/06-implementation-plan.md) — 実装計画・フェーズ分割・レビュー観点
+
+## 技術スタック
+
+- [Next.js](https://nextjs.org/) 15(App Router, Server Actions, Server Components)
+- [React](https://react.dev/) 19
+- [TypeScript](https://www.typescriptlang.org/) strict
+- [Supabase](https://supabase.com/)(Postgres, Auth, Row Level Security)
+- [Tailwind CSS](https://tailwindcss.com/) v4(`@tailwindcss/postcss`。ただし画面のスタイルは主に `src/app/globals.css` の PoC 移植トークン/クラスを使用)
+- [Anthropic Claude API](https://docs.anthropic.com/)(`@anthropic-ai/sdk`)。未設定でも決定的フォールバックで全画面が動作します
+- [Vitest](https://vitest.dev/)(単体テスト)、[ESLint](https://eslint.org/)
+
+## セットアップ
+
+### 1. 依存関係のインストール
+
+```bash
+npm install
+```
+
+### 2. Supabase プロジェクトの用意
+
+ローカルの Supabase CLI スタックを使う場合:
+
+```bash
+supabase start
+```
+
+既存のホスト型 Supabase プロジェクトにリンクする場合:
+
+```bash
+supabase link --project-ref <your-project-ref>
+supabase db push
+```
+
+いずれの場合も、`supabase/migrations/` の3本のマイグレーションが適用されます。
+
+- `20260813000001_schema.sql` — 全テーブル・制約・インデックス・トリガ・DB関数
+- `20260813000002_rls.sql` — RLSポリシーと `SECURITY DEFINER` ヘルパー関数
+- `20260813000003_seed_questions.sql` — インタビュー設問6問
+
+### 3. シードデータの投入
+
+`supabase start`(ローカル)の場合は `supabase/seed.sql` が `db reset` 時に自動投入され、ダミー組織2件と招待コード(`KARIYA-2026` / `TOYOTA-2026`)が作成されます。
+
+ホスト型プロジェクトにリンクした場合は、同じ内容を手動で流してください。
+
+```bash
+psql "$SUPABASE_DB_URL" -f supabase/seed.sql
+```
+
+### 4. 環境変数
+
+`.env.example` を `.env.local` にコピーし、値を埋めてください。
+
+```bash
+cp .env.example .env.local
+```
+
+| 変数名 | 用途 | サーバー専用 |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase プロジェクトURL | いいえ(ブラウザに公開) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon キー(RLSで保護される前提) | いいえ(ブラウザに公開) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service_role キー。RLSを迂回する | **はい**(`NEXT_PUBLIC_` を付けない) |
+| `ANTHROPIC_API_KEY` | Claude APIキー。未設定なら決定的フォールバックで動作(NFR-4) | **はい** |
+| `ANTHROPIC_MODEL_CONVERSATION` | アバター間会話生成に使うモデル。既定 `claude-sonnet-5` | **はい** |
+| `ANTHROPIC_MODEL_EVALUATION` | 相性評価に使うモデル。既定 `claude-opus-5` | **はい** |
+| `CRON_SECRET` | `/api/cron/matching` を保護するシークレット。未設定時は常に401 | **はい** |
+| `MATCH_NOTIFY_THRESHOLD` | 通知を作成する総合スコアの閾値。既定 `75` | いいえ(サーバーのみで参照) |
+| `MATCH_BATCH_LIMIT` | バッチ1回あたりの処理候補数上限。既定 `20` | いいえ(サーバーのみで参照) |
+| `MAX_OPEN_MATCHES_PER_PROFILE` | 1参加者あたりの未判断マッチ数上限。既定 `3` | いいえ(サーバーのみで参照) |
+
+`SUPABASE_SERVICE_ROLE_KEY` / `ANTHROPIC_API_KEY` / `CRON_SECRET` は、`src/lib/supabase/admin.ts` と一部の Server Action(`src/app/actions/invite.ts`、`src/lib/matching/pipeline.ts`、`src/app/actions/settings.ts` の `deleteAccount`)からのみ参照され、クライアントバンドルには含まれません(NFR-9)。
+
+### 5. 開発サーバーの起動
+
+```bash
+npm run dev
+```
+
+`http://localhost:3000` を開くと、未ログインの場合は `/login` にリダイレクトされます。
+
+## マッチングバッチの実行
+
+マッチングバッチ(ペルソナ生成の再試行 → 候補生成 → アバター間会話 → 相性評価 → 閾値以上のマッチの通知)は `POST /api/cron/matching` で実行します。`CRON_SECRET` が未設定、または一致しない場合は常に `401` を返します(誤って公開状態で運用しないため)。
+
+### ローカルでの手動実行
+
+```bash
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" localhost:3000/api/cron/matching
+```
+
+成功時のレスポンス例:
+
+```json
+{
+  "personasGenerated": 3,
+  "candidatesCreated": 7,
+  "conversationsGenerated": 7,
+  "reportsGenerated": 7,
+  "notified": 2,
+  "failed": 0,
+  "durationMs": 18432
+}
+```
+
+### 定期実行のスケジューリング(Vercel Cron の例)
+
+`vercel.json` に以下を追加し、`CRON_SECRET` を Vercel の環境変数に設定してください(Vercel Cron からのリクエストには `Authorization` ヘッダーを付与できないため、実際にはヘッダー付与用のプロキシ関数を挟むか、`CRON_SECRET` をクエリ文字列やVercel側のCron Secretの仕組みで検証する構成に読み替えてください)。
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/matching",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}
+```
+
+Vercel 以外(例: 汎用の cron / GitHub Actions)でスケジュールする場合は、上記の `curl` コマンドを好きな間隔で実行するだけで構いません。
+
+## `ANTHROPIC_API_KEY` なしでの動作
+
+`ANTHROPIC_API_KEY` を設定しなくても、アプリ全体が動作します(NFR-4)。
+
+- ペルソナ生成: `src/lib/ai/fallback.ts` の決定的ルールでフォールバック生成(`personas.model = 'fallback'`)
+- アバター間会話: `src/lib/ai/conversation.ts` がフォールバックの固定パターン会話を生成
+- 相性評価: `src/lib/ai/compatibility.ts` がペルソナの `traits` から決定的にスコア・軸コメントを算出
+
+いずれの場合も `model` カラムに `'fallback'` を記録し、LLM呼び出しの失敗が画面のクラッシュや待機状態の固着につながらないようにしています。
+
+## RLS の検証
+
+Postgres の Row Level Security はアプリの単体テスト(`npx vitest run`)では検証できないため、`supabase/tests/rls.sql` に検証用SQLを用意しています。ローカルの `supabase start` 上で実行してください。
+
+```bash
+supabase start
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/tests/rls.sql
+```
+
+主な検証内容:
+
+- 片側だけ `accept` した状態で、相手の `identities` 行を `SELECT` しても0行しか返らないこと
+- 相手の `match_decisions` 行を `SELECT` しても0行しか返らないこと(NFR-2: 「未判断」と「辞退」を区別できない)
+- 両者 `accept` 後は `identities` が1行返ること
+
+## 未実装(スコープ外)
+
+`docs/06-implementation-plan.md` §4 で明示されているとおり、以下は本実装のスコープ外です。
+
+- Web Push / メール通知の実配信(アプリ内の `notifications` テーブルへの記録のみ)
+- 組織管理者向け画面(NFR-3: 人事非閲覧の方針により、意図的に実装しない)
+- 会話ログの再生成・相性レポートの再評価をユーザーが要求する機能
+- 複数マッチの同時進行UI(データモデルは複数マッチに対応済みだが、UIは最新1件を主に扱う)
+- E2Eテスト(Playwright)
+- 日本語以外の言語対応(i18n)
+
+## テスト・検証コマンド
+
+```bash
+npx tsc --noEmit   # 型チェック
+npx eslint .        # Lint
+npx vitest run       # 単体テスト
+npm run build         # 本番ビルド
+```

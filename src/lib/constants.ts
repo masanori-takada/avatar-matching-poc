@@ -133,6 +133,14 @@ export const COPY = {
     empty: "まだ開示できる情報はありません。相性レポートで「会う」を選ぶと表示されます。",
     waitingPartnerTitle: "お相手の回答をお待ちしています",
     waitingPartnerBody: "お相手が「会う」を選ぶと、実名情報と面談候補日時が表示されます。",
+    nameLabel: "氏名",
+    companyLabel: "所属",
+    ageRangeLabel: "年代",
+    messageLabel: "一言",
+    unknownValue: "-",
+    slotSubmit: "この日時で調整する",
+    otherSlotChosen: "お相手は別の枠を選ばれました。運営が調整します。",
+    waitingAfterSelect: "お相手の回答をお待ちしています",
   },
 
   done: {
@@ -161,10 +169,55 @@ export const COPY = {
 
   privacy: {
     title: "プライバシーについて",
+    openSettings: "設定を開く",
+    cards: [
+      {
+        heading: "匿名性は前提条件です",
+        body: "実名・所属はアプリのどこにも表示されません。両者が「会う」を選んだ後にのみ、お互いにだけ開示されます。",
+      },
+      {
+        heading: "人事も運営者も見られません",
+        body: "誰と会話しているか、どんなマッチが成立したかを、勤務先の人事や運営者が閲覧することはできません。",
+      },
+      {
+        heading: "断っても伝わりません",
+        body: "辞退した事実は相手に通知されません。「断られた」という体験が発生しない設計です。",
+      },
+      {
+        heading: "あなたの回答の使われ方",
+        body: "インタビューの回答は、あなたのAIアバターがあなたらしく振る舞うためにのみ使われます。",
+      },
+      {
+        heading: "データの保存について",
+        body: "入力内容はSupabase上のデータベースに保存され、行レベルセキュリティ(RLS)によって、ご本人と相互accept後の相手以外は参照できません。「設定」からアカウントと全データを削除できます。",
+      },
+    ],
   },
 
   faq: {
     title: "よくある質問",
+    items: [
+      {
+        question: "相手は私のことをどこまで知っていますか?",
+        answer: "実名・所属は知りません。アバター同士の会話を通じて、話し方や考え方が伝わります。",
+      },
+      {
+        question: "アバターは私に無断で何かを決めますか?",
+        answer: "決めません。アバターは会話をするだけで、会うかどうかは必ずご本人が判断します。",
+      },
+      {
+        question: "通知が来ないのですが?",
+        answer: "相性の基準を満たしたときだけ通知が届きます。基準に満たない場合は何も起きません。",
+      },
+      {
+        question: "辞退したことは相手に伝わりますか?",
+        answer: "伝わりません。",
+      },
+      {
+        question: "会社に利用状況が知られますか?",
+        answer: "知られません。人事が個人のマッチ内容を閲覧することはできません。",
+      },
+    ],
   },
 
   mypage: {
@@ -186,11 +239,15 @@ export const COPY = {
   settings: {
     title: "設定",
     notifyLabel: "通知を受け取る",
+    notifySaveError: "設定の保存に失敗しました",
+    privacyLink: "プライバシーについて",
+    faqLink: "よくある質問",
     deleteAccount: "アカウントを削除する",
     deleteAccountNote: "アカウントと全データを削除します。この操作は取り消せません。",
     deleteSheetTitle: "アカウント削除の確認",
     deleteSheetMessage: "アカウントと全データを削除します。よろしいですか?",
     deleteSheetConfirm: "削除する",
+    deleteError: "削除に失敗しました。もう一度お試しください。",
   },
 
   nav: {
