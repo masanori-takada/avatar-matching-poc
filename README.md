@@ -78,7 +78,7 @@ supabase db push
 
 - `20260813000001_schema.sql` — 全テーブル・制約・インデックス・トリガ・DB関数
 - `20260813000002_rls.sql` — RLSポリシーと `SECURITY DEFINER` ヘルパー関数
-- `20260813000003_seed_questions.sql` — インタビュー設問6問
+- `20260813000003_seed_questions.sql` — インタビュー設問20問
 
 ### 3. シードデータの投入
 

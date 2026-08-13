@@ -73,18 +73,25 @@ export async function generateStructured<T>(params: {
 
 ### フォールバック `lib/ai/fallback.ts` → `buildFallbackPersona(answers)`
 
-選択式の回答を、選択肢のインデックスから決定的に `traits` へ写像する。
+選択式の回答を、選択肢のインデックスから決定的に `traits` へ写像する。20問のうち複数の設問が同じ trait に投票することがあるため、`lib/ai/fallback.ts` の `TRAIT_VOTES` テーブル（設問コード → trait → 選択肢インデックス→値）で **多数決** を取る。
 
-| 設問 | 選択肢 → traits |
+| trait | 投票する設問（選択肢 → 値は全設問共通） |
 |---|---|
-| q1 休日 | 0→`outgoing` / 1→`reserved` / 2→`balanced` → `social_energy` |
-| q2 初対面 | 0→`initiator` / 1→`listener` / 2→`adaptive` → `conversation_style` |
-| q4 心地よさ | 0→`humor` / 1→`shared_values` / 2→`new_perspectives` → `comfort_preference` |
-| q5 将来 | 0→`concrete` / 1→`vague` / 2→`open` → `future_orientation` |
+| `social_energy` | q1, q7, q11, q16（0→`outgoing` / 1→`reserved` / 2→`balanced`） |
+| `conversation_style` | q2, q8, q13（0→`initiator` / 1→`listener` / 2→`adaptive`） |
+| `comfort_preference` | q4, q9, q17（0→`humor` / 1→`shared_values` / 2→`new_perspectives`） |
+| `future_orientation` | q5, q12, q15, q19（0→`concrete` / 1→`vague` / 2→`open`） |
 
-自由記述（q3, q6）からは、日本語の助詞・記号で分割して2字以上の語を頻度順に最大5語取り、`values_keywords` にする。`must_know` は q6 の先頭80字。`summary` は traits をテンプレート文に埋めて組み立てる。
+集計ルール（決定的であること）:
 
-設問コードが未知の場合（設問を差し替えたとき）は `kind` だけを見て、`choice` は無視、`free` はキーワード抽出に回す。フォールバックが設問セットに依存して壊れないこと。
+1. 対象コードが回答に存在し、かつ回答が選択肢のいずれかと一致するものだけを1票として数える。
+2. 最多得票の値を採用する。
+3. 同数のときは、その trait の正準順（上表の値の並び順。例: `social_energy` は `outgoing` < `reserved` < `balanced`）で先に現れる値を採る。
+4. その trait に投票する設問が1つも回答されていない場合は既定値（`balanced` / `adaptive` / `new_perspectives` / `open`）を使う。これは元の6問構成で q1/q2/q4/q5 が未回答のときに三項演算子チェーンが最終的に落ち着いていた値と同じであり、6問だけ回答したケースの挙動は変わらない。
+
+自由記述（q3, q10, q14, q18, q20, q6 の最大6問）からは、日本語の助詞・記号で分割して2字以上の語を頻度順に最大5語取り、`values_keywords` にする。`must_know` は `q6` の回答があればその先頭80字、無ければ最後の自由記述回答の先頭80字。`summary` は traits をテンプレート文に埋めて組み立てる。
+
+設問コードが未知の場合（設問を差し替えたとき）は、その設問はどの trait の投票にも数えられず無視される（`TRAIT_VOTES` に無いコードは単に無視される）。`kind='free'` の設問はコードによらずキーワード抽出に回る。フォールバックが設問セットに依存して壊れないこと。
 
 ## 4. アバター間会話生成 `lib/ai/conversation.ts`
 

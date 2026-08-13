@@ -18,7 +18,7 @@
 - `supabase/config.toml`
 - `supabase/migrations/20260813000001_schema.sql` — `03-data-model.md` §2 の全テーブル・制約・インデックス・トリガ・DB関数
 - `supabase/migrations/20260813000002_rls.sql` — §4 の全ポリシーと `SECURITY DEFINER` ヘルパー
-- `supabase/migrations/20260813000003_seed_questions.sql` — 6問の設問
+- `supabase/migrations/20260813000003_seed_questions.sql` — 20問の設問
 - `supabase/seed.sql` — ローカル用のダミー組織2件と招待コード
 - `supabase/tests/rls.sql` — §8 の検証SQL
 - `src/types/database.ts` — 手書き（Supabaseプロジェクト未作成のため生成できない）。`Database` 型を上記スキーマに一致させる

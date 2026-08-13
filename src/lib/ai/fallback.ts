@@ -74,6 +74,104 @@ function choiceIndex(item: FallbackAnswerInput | undefined): number | null {
   return idx >= 0 ? idx : null;
 }
 
+// -----------------------------------------------------------------------------
+// trait 投票マッピング(設問セットが20問に拡張されたことに伴う多数決方式)
+// -----------------------------------------------------------------------------
+
+/**
+ * 設問コード → その設問が投票する trait と、選択肢インデックス→値の対応。
+ * 設問セットを差し替えても壊れないよう、ここに無いコードは単に無視される
+ * (byCode に存在しない、選択肢が一致しない、choiceIndex が null、のいずれか)。
+ */
+const TRAIT_VOTES = {
+  social_energy: {
+    q1: ["outgoing", "reserved", "balanced"],
+    q7: ["outgoing", "reserved", "balanced"],
+    q11: ["outgoing", "reserved", "balanced"],
+    q16: ["outgoing", "reserved", "balanced"],
+  },
+  conversation_style: {
+    q2: ["initiator", "listener", "adaptive"],
+    q8: ["initiator", "listener", "adaptive"],
+    q13: ["initiator", "listener", "adaptive"],
+  },
+  comfort_preference: {
+    q4: ["humor", "shared_values", "new_perspectives"],
+    q9: ["humor", "shared_values", "new_perspectives"],
+    q17: ["humor", "shared_values", "new_perspectives"],
+  },
+  future_orientation: {
+    q5: ["concrete", "vague", "open"],
+    q12: ["concrete", "vague", "open"],
+    q15: ["concrete", "vague", "open"],
+    q19: ["concrete", "vague", "open"],
+  },
+} as const satisfies {
+  social_energy: Record<string, readonly SocialEnergy[]>;
+  conversation_style: Record<string, readonly ConversationStyle[]>;
+  comfort_preference: Record<string, readonly ComfortPreference[]>;
+  future_orientation: Record<string, readonly FutureOrientation[]>;
+};
+
+// 各 trait の既定値(votes が1件も無いときに使う)。
+// 今日の実装(q1/q2/q4/q5 のみを見る三項演算子の連鎖)が、該当する設問が
+// 未回答/未知のときに最終的に落ち着く値と同じにしてあり、6問だけ回答した
+// 場合の挙動を完全に保つ。
+const TRAIT_DEFAULTS = {
+  social_energy: "balanced",
+  conversation_style: "adaptive",
+  comfort_preference: "new_perspectives",
+  future_orientation: "open",
+} as const;
+
+/**
+ * ある trait について、対象の設問群の回答を多数決で集計し、決定的に1値を選ぶ。
+ * - 集計対象は、byCode にその設問コードが存在し、かつ回答が選択肢のいずれかと
+ *   一致するものだけ(=`choiceIndex` が非 null)。
+ * - 同数の場合は、`values`(トレイトの正準順)で先に現れる方を採用する
+ *   (tie-break は決定的であることが要求されるため、投票の到着順ではなく
+ *   固定された値の順序で決める)。
+ * - 1件も投票が無ければ `fallbackValue` を返す。
+ */
+function voteTrait<V extends string>(
+  byCode: ReadonlyMap<string, FallbackAnswerInput>,
+  votes: Record<string, readonly V[]>,
+  values: readonly V[],
+  fallbackValue: V,
+): V {
+  const counts = new Map<V, number>();
+
+  for (const [code, options] of Object.entries(votes)) {
+    const idx = choiceIndex(byCode.get(code));
+    if (idx === null) continue;
+    const value = options[idx];
+    if (value === undefined) continue;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  if (counts.size === 0) return fallbackValue;
+
+  let winner: V = values[0] ?? fallbackValue;
+  let winnerCount = -1;
+  for (const value of values) {
+    const count = counts.get(value) ?? 0;
+    if (count > winnerCount) {
+      winnerCount = count;
+      winner = value;
+    }
+  }
+  return winnerCount > 0 ? winner : fallbackValue;
+}
+
+const SOCIAL_ENERGY_VALUES: readonly SocialEnergy[] = ["outgoing", "reserved", "balanced"];
+const CONVERSATION_STYLE_VALUES: readonly ConversationStyle[] = ["initiator", "listener", "adaptive"];
+const COMFORT_PREFERENCE_VALUES: readonly ComfortPreference[] = [
+  "humor",
+  "shared_values",
+  "new_perspectives",
+];
+const FUTURE_ORIENTATION_VALUES: readonly FutureOrientation[] = ["concrete", "vague", "open"];
+
 const SOCIAL_ENERGY_TEXT: Record<SocialEnergy, string> = {
   outgoing: "休日は人と会って過ごすことが多く、",
   reserved: "休日は家で自分の時間を大切にする方で、",
@@ -118,21 +216,30 @@ const SOCIAL_ENERGY_SPEAKING: Record<SocialEnergy, string> = {
 export function buildFallbackPersona(answers: readonly FallbackAnswerInput[]): FallbackPersonaResult {
   const byCode = new Map(answers.map((a) => [a.questionCode, a]));
 
-  const q1Index = choiceIndex(byCode.get("q1"));
-  const social_energy: SocialEnergy =
-    q1Index === 0 ? "outgoing" : q1Index === 1 ? "reserved" : "balanced";
-
-  const q2Index = choiceIndex(byCode.get("q2"));
-  const conversation_style: ConversationStyle =
-    q2Index === 0 ? "initiator" : q2Index === 1 ? "listener" : "adaptive";
-
-  const q4Index = choiceIndex(byCode.get("q4"));
-  const comfort_preference: ComfortPreference =
-    q4Index === 0 ? "humor" : q4Index === 1 ? "shared_values" : "new_perspectives";
-
-  const q5Index = choiceIndex(byCode.get("q5"));
-  const future_orientation: FutureOrientation =
-    q5Index === 0 ? "concrete" : q5Index === 1 ? "vague" : "open";
+  const social_energy = voteTrait(
+    byCode,
+    TRAIT_VOTES.social_energy,
+    SOCIAL_ENERGY_VALUES,
+    TRAIT_DEFAULTS.social_energy,
+  );
+  const conversation_style = voteTrait(
+    byCode,
+    TRAIT_VOTES.conversation_style,
+    CONVERSATION_STYLE_VALUES,
+    TRAIT_DEFAULTS.conversation_style,
+  );
+  const comfort_preference = voteTrait(
+    byCode,
+    TRAIT_VOTES.comfort_preference,
+    COMFORT_PREFERENCE_VALUES,
+    TRAIT_DEFAULTS.comfort_preference,
+  );
+  const future_orientation = voteTrait(
+    byCode,
+    TRAIT_VOTES.future_orientation,
+    FUTURE_ORIENTATION_VALUES,
+    TRAIT_DEFAULTS.future_orientation,
+  );
 
   const freeAnswers = answers.filter((a) => a.kind === "free" && a.answer.trim() !== "");
   const values_keywords = extractKeywords(

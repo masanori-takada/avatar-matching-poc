@@ -129,6 +129,113 @@ describe("buildFallbackPersona", () => {
       traits: result.traits,
     });
     expect(parsed.success).toBe(true);
+    // 未知コードは無視されるので、投票が1件も無く既定値になる
+    expect(result.traits.social_energy).toBe("balanced");
+    expect(result.traits.conversation_style).toBe("adaptive");
+    expect(result.traits.comfort_preference).toBe("new_perspectives");
+    expect(result.traits.future_orientation).toBe("open");
+  });
+
+  it("ignores unknown/extra question codes mixed in with known ones, without throwing", () => {
+    const withExtras: FallbackAnswerInput[] = [
+      ...ANSWERS,
+      { questionCode: "q999", kind: "choice", options: ["x", "y"], answer: "x" },
+      { questionCode: "q_typo", kind: "free", options: [], answer: "無視されるはずのテキスト" },
+    ];
+    expect(() => buildFallbackPersona(withExtras)).not.toThrow();
+    const withoutExtras = buildFallbackPersona(ANSWERS);
+    const withExtrasResult = buildFallbackPersona(withExtras);
+    // 追加の free 回答はキーワード抽出には混ざるが、choice trait には影響しない
+    expect(withExtrasResult.traits.social_energy).toBe(withoutExtras.traits.social_energy);
+    expect(withExtrasResult.traits.conversation_style).toBe(withoutExtras.traits.conversation_style);
+    expect(withExtrasResult.traits.comfort_preference).toBe(withoutExtras.traits.comfort_preference);
+    expect(withExtrasResult.traits.future_orientation).toBe(withoutExtras.traits.future_orientation);
+  });
+
+  it("only the original 6 questions answered still produce today's exact traits (regression guard)", () => {
+    // ANSWERS/ANSWERS_B は q1,q2,q3,q4,q5,q6 のみ。20問構成でも、この6問だけ
+    // 回答した場合の traits は多数決導入前とビット単位で同じでなければならない。
+    const resultA = buildFallbackPersona(ANSWERS);
+    expect(resultA.traits.social_energy).toBe("reserved");
+    expect(resultA.traits.conversation_style).toBe("listener");
+    expect(resultA.traits.comfort_preference).toBe("shared_values");
+    expect(resultA.traits.future_orientation).toBe("open");
+
+    const resultB = buildFallbackPersona(ANSWERS_B);
+    expect(resultB.traits.social_energy).toBe("outgoing");
+    expect(resultB.traits.conversation_style).toBe("initiator");
+    expect(resultB.traits.comfort_preference).toBe("humor");
+    expect(resultB.traits.future_orientation).toBe("concrete");
+  });
+
+  it("majority vote: 3 of 4 social_energy questions answered outgoing-ish wins outgoing", () => {
+    const answers: FallbackAnswerInput[] = [
+      {
+        questionCode: "q1",
+        kind: "choice",
+        options: ["外に出かけて人と会う", "家でゆっくり自分の時間", "日によって半々くらい"],
+        answer: "外に出かけて人と会う", // outgoing
+      },
+      {
+        questionCode: "q7",
+        kind: "choice",
+        options: ["もっと人と話したくなる", "ひとりの時間で充電したい", "そのときの気分による"],
+        answer: "もっと人と話したくなる", // outgoing
+      },
+      {
+        questionCode: "q11",
+        kind: "choice",
+        options: ["誰かを誘って出かける", "家でやりたかったことをする", "その日の気分で決める"],
+        answer: "誰かを誘って出かける", // outgoing
+      },
+      {
+        questionCode: "q16",
+        kind: "choice",
+        options: ["うれしくてすぐ乗る", "予定を崩したくない", "内容次第で決める"],
+        answer: "予定を崩したくない", // reserved (the odd one out)
+      },
+    ];
+    const result = buildFallbackPersona(answers);
+    expect(result.traits.social_energy).toBe("outgoing");
+  });
+
+  it("tie-break is deterministic: earliest canonical value wins on a tie", () => {
+    // q1 → outgoing, q7 → reserved: 1 vote each, tie.
+    // 正準順(outgoing, reserved, balanced)で先に現れる outgoing が勝つ。
+    const answers: FallbackAnswerInput[] = [
+      {
+        questionCode: "q1",
+        kind: "choice",
+        options: ["外に出かけて人と会う", "家でゆっくり自分の時間", "日によって半々くらい"],
+        answer: "外に出かけて人と会う", // outgoing
+      },
+      {
+        questionCode: "q7",
+        kind: "choice",
+        options: ["もっと人と話したくなる", "ひとりの時間で充電したい", "そのときの気分による"],
+        answer: "ひとりの時間で充電したい", // reserved
+      },
+    ];
+    const result = buildFallbackPersona(answers);
+    expect(result.traits.social_energy).toBe("outgoing");
+
+    // 逆の並びでも同じ結果になること(投票の到着順ではなく正準順で決まる)を確認
+    const reordered = [...answers].reverse();
+    const reorderedResult = buildFallbackPersona(reordered);
+    expect(reorderedResult.traits.social_energy).toBe("outgoing");
+  });
+
+  it("caps values_keywords at 5 entries even with 6 free answers", () => {
+    const sixFreeAnswers: FallbackAnswerInput[] = [
+      { questionCode: "q3", kind: "free", options: [], answer: "アルファ ベータ ガンマ デルタ" },
+      { questionCode: "q10", kind: "free", options: [], answer: "イプシロン ゼータ イータ シータ" },
+      { questionCode: "q14", kind: "free", options: [], answer: "アイオタ カッパ ラムダ ミュー" },
+      { questionCode: "q18", kind: "free", options: [], answer: "ニュー クサイ オミクロン パイ" },
+      { questionCode: "q20", kind: "free", options: [], answer: "ロー シグマ タウ ウプシロン" },
+      { questionCode: "q6", kind: "free", options: [], answer: "ファイ カイ プサイ オメガ" },
+    ];
+    const result = buildFallbackPersona(sixFreeAnswers);
+    expect(result.traits.values_keywords.length).toBeLessThanOrEqual(5);
   });
 });
 

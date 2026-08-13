@@ -119,7 +119,7 @@ export function InterviewChat({ questions, initialAnswers }: InterviewChatProps)
       </div>
 
       <div className="chat interview__chat" ref={viewportRef}>
-        <Bubble variant="ai">{COPY.interview.intro}</Bubble>
+        <Bubble variant="ai">{COPY.interview.intro(questions.length)}</Bubble>
 
         {answered.map((item) => (
           <div key={item.questionId}>
