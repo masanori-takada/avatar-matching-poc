@@ -156,18 +156,43 @@ Vercel 以外(例: 汎用の cron / GitHub Actions)でスケジュールする�
 
 ## RLS の検証
 
-Postgres の Row Level Security はアプリの単体テスト(`npx vitest run`)では検証できないため、`supabase/tests/rls.sql` に検証用SQLを用意しています。ローカルの `supabase start` 上で実行してください。
+Postgres の Row Level Security はアプリの単体テスト(`npx vitest run`)では検証できないため、`supabase/tests/rls.sql` に**自動検証スイート(38項目)**を用意しています。フィクスチャの作成から後片付け(`rollback`)まで含まれており、1項目でも落ちればその場で例外を投げて中断します。最後まで流れて `ALL RLS CHECKS PASSED` が出れば全項目合格です。
+
+Supabase のローカルスタック上で実行する場合:
 
 ```bash
 supabase start
-psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/tests/rls.sql
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+  -f supabase/tests/_bootstrap.sql \
+  -f supabase/tests/rls.sql
 ```
 
-主な検証内容:
+Docker が使えない環境では、素の PostgreSQL 16 でも検証できます。`supabase/tests/_bootstrap.sql` が Supabase 側の前提(ロール `anon` / `authenticated` / `service_role`、`auth.users`、`auth.uid()`)を最小限に再現するため、マイグレーションは**無改変のまま**適用できます。
 
-- 片側だけ `accept` した状態で、相手の `identities` 行を `SELECT` しても0行しか返らないこと
-- 相手の `match_decisions` 行を `SELECT` しても0行しか返らないこと(NFR-2: 「未判断」と「辞退」を区別できない)
-- 両者 `accept` 後は `identities` が1行返ること
+```bash
+createdb rlstest
+psql -d rlstest \
+  -f supabase/tests/_bootstrap.sql \
+  -f supabase/migrations/20260813000001_schema.sql \
+  -f supabase/migrations/20260813000002_rls.sql \
+  -f supabase/migrations/20260813000003_seed_questions.sql \
+  -f supabase/tests/rls.sql
+```
+
+検証している内容(抜粋):
+
+| ケース | 検証内容 |
+|---|---|
+| 1. 未判断 | 相手の `identities` が0行。閾値未満(`evaluated`)のマッチが見えない。相互accept前は面談枠が見えない |
+| 2. 片側のみ accept | 相手の実名はまだ0行。`finalize_match_if_mutual` を呼んでも成立しない |
+| 3. 相手が decline | **辞退した側の判断行が読めない。マッチの `status` も `notified` のまま変化しない**(NFR-2: 「未判断」と「辞退」が区別できない) |
+| 4. 両者 accept | 実名・年代が1行返り、面談枠が3件見える。それでも相手の判断行そのものは読めない |
+| 5. 冪等性 | `finalize_match_if_mutual` を二重に呼んでも面談枠3件・通知2件のまま増えない |
+| 6. 第三者 | 無関係な参加者から、他人のマッチ・会話ログ・レポート・実名・面談枠・通知がすべて0行。`invite_codes` は権限エラーで拒否 |
+| 7. 書き込み | 他人のマッチへの判断書き込み、判断の `UPDATE`、`interview_completed_at` / `organization_id` の改竄、`consume_invite_code` の直接実行、他人の `identities` 作成 — すべて拒否。自分の `notifications_enabled` の更新のみ通る |
+| 8. 未認証 | `anon` から `profiles` / `identities` / `matches` / `match_decisions` がすべて権限エラーで拒否 |
+
+なお `invite_codes` と `anon` からの各テーブルは、RLS で0行が返るのではなく **`grant` を与えていないためテーブルレベルの権限エラーで弾かれます**。0行返却より強い遮断です。
 
 ## 未実装(スコープ外)
 
