@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: typecheck / lint / test / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # ビルドは環境変数なしでも成功する
+      # (Supabase を使うページはすべて `export const dynamic = "force-dynamic"`
+      # で明示的に動的レンダリングにしているため、ビルド時に env を要求しない)。
+      - name: Build
+        run: npm run build
+
+  rls:
+    name: RLS 検証 (supabase/tests/rls.sql)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply migrations and run RLS suite
+        run: |
+          psql -v ON_ERROR_STOP=1 -f supabase/tests/_bootstrap.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260813000001_schema.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260813000002_rls.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260813000003_seed_questions.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/tests/rls.sql
