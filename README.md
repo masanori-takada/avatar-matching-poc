@@ -147,7 +147,7 @@ curl -X POST -H "Authorization: Bearer $CRON_SECRET" localhost:3000/api/cron/mat
 
 ### 定期実行のスケジューリング(Vercel Cron の例)
 
-`vercel.json` に以下を追加し、`CRON_SECRET` を Vercel の環境変数に設定してください(Vercel Cron からのリクエストには `Authorization` ヘッダーを付与できないため、実際にはヘッダー付与用のプロキシ関数を挟むか、`CRON_SECRET` をクエリ文字列やVercel側のCron Secretの仕組みで検証する構成に読み替えてください)。
+リポジトリ直下の [`vercel.json`](vercel.json) に設定済みです(15分間隔)。
 
 ```json
 {
@@ -159,6 +159,10 @@ curl -X POST -H "Authorization: Bearer $CRON_SECRET" localhost:3000/api/cron/mat
   ]
 }
 ```
+
+Vercel の環境変数に `CRON_SECRET` を設定しておけば、**Vercel Cron はスケジュール実行時に `Authorization: Bearer <CRON_SECRET>` を自動的に付与します**([公式ドキュメント](https://vercel.com/docs/cron-jobs/manage-cron-jobs))。追加のプロキシ等は不要です。
+
+なお **Vercel Cron は `GET` で呼び出します**。`/api/cron/matching` は `GET` と `POST` の両方を実装しており、`GET` が Vercel Cron 用、`POST` が手動実行(下記の `curl`)や Vercel 以外のスケジューラ用です。`GET` を実装していないと 405 になり cron が動きません。
 
 Vercel 以外(例: 汎用の cron / GitHub Actions)でスケジュールする場合は、上記の `curl` コマンドを好きな間隔で実行するだけで構いません。
 
