@@ -98,6 +98,9 @@ export const COPY = {
   },
 
   report: {
+    partnerLabel: "お相手 A さん",
+    partnerSub: "実名・所属は非表示です",
+    partnerNote: "※お互いが「会う」を選ぶまで、実名・所属は表示されません。",
     empty: "まだレポートはありません。アバターが会話を続けています。",
     logNote: "これは、あなたが寝ている間にAIアバター同士が交わした会話です。",
     axesTitle: "相性レポート",

@@ -51,6 +51,7 @@ export interface Database {
           anonymous_id_prefix?: string;
           created_at?: string;
         };
+        Relationships: [];
       };
       invite_codes: {
         Row: {
@@ -80,6 +81,7 @@ export interface Database {
           expires_at?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
       profiles: {
         Row: {
@@ -112,6 +114,7 @@ export interface Database {
           is_active?: boolean;
           created_at?: string;
         };
+        Relationships: [];
       };
       identities: {
         Row: {
@@ -138,6 +141,7 @@ export interface Database {
           message?: string | null;
           updated_at?: string;
         };
+        Relationships: [];
       };
       interview_questions: {
         Row: {
@@ -167,6 +171,7 @@ export interface Database {
           options?: Json;
           is_active?: boolean;
         };
+        Relationships: [];
       };
       interview_answers: {
         Row: {
@@ -190,6 +195,7 @@ export interface Database {
           answer?: string;
           created_at?: string;
         };
+        Relationships: [];
       };
       personas: {
         Row: {
@@ -216,6 +222,7 @@ export interface Database {
           model?: string;
           generated_at?: string;
         };
+        Relationships: [];
       };
       matches: {
         Row: {
@@ -251,6 +258,7 @@ export interface Database {
           notified_at?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
       avatar_conversations: {
         Row: {
@@ -274,6 +282,7 @@ export interface Database {
           model?: string;
           generated_at?: string;
         };
+        Relationships: [];
       };
       compatibility_reports: {
         Row: {
@@ -300,6 +309,7 @@ export interface Database {
           model?: string;
           generated_at?: string;
         };
+        Relationships: [];
       };
       match_decisions: {
         Row: {
@@ -323,6 +333,7 @@ export interface Database {
           decision?: MatchDecisionValue;
           decided_at?: string;
         };
+        Relationships: [];
       };
       meeting_slots: {
         Row: {
@@ -349,6 +360,7 @@ export interface Database {
           place?: string;
           sort_order?: number;
         };
+        Relationships: [];
       };
       slot_selections: {
         Row: {
@@ -372,6 +384,7 @@ export interface Database {
           slot_id?: string;
           selected_at?: string;
         };
+        Relationships: [];
       };
       notifications: {
         Row: {
@@ -404,6 +417,7 @@ export interface Database {
           read_at?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
     };
     Views: Record<string, never>;
