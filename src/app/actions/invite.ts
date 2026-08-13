@@ -68,10 +68,21 @@ export async function registerWithInviteCode(
     return { ok: false, error: "すでに登録済みです" };
   }
 
+  // finding #7: profiles と identities を consume_invite_code 1関数のなかで
+  // まとめて INSERT する(1トランザクション)。以前は identities への INSERT を
+  // ここで別途行っていたため、失敗すると profiles だけが作られた壊れた状態が
+  // 残り、ユーザー自身では修復できず(identities への INSERT ポリシーは
+  // 自分の行にしか許さないが、その行を再度作ろうとしても既に profiles がある
+  // ため consume_invite_code 自体が ALREADY_REGISTERED で弾いてしまう)、
+  // 相互accept後の相手の開示ページも壊れたままになっていた。
   const admin = createAdminClient();
   const { data: rpcResult, error: rpcError } = await admin.rpc("consume_invite_code", {
     p_code: code,
     p_user_id: user.id,
+    p_full_name: fullName,
+    p_company_name: companyName,
+    p_department: department || null,
+    p_message: message || null,
   });
 
   if (rpcError) {
@@ -91,18 +102,6 @@ export async function registerWithInviteCode(
   const organizationId = rpcResult?.[0]?.organization_id;
   if (!organizationId) {
     return { ok: false, error: "招待コードが正しくありません", field: "code" };
-  }
-
-  const { error: identityError } = await supabase.from("identities").insert({
-    profile_id: user.id,
-    full_name: fullName,
-    company_name: companyName,
-    department: department || null,
-    message: message || null,
-  });
-
-  if (identityError) {
-    return { ok: false, error: "登録に失敗しました。もう一度お試しください。" };
   }
 
   if (ageRange !== "") {

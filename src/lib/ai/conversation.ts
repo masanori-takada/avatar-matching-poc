@@ -3,6 +3,7 @@ import "server-only";
 import { AI_MODELS, generateStructured } from "@/lib/ai/client";
 import { buildSaveConversationTool, conversationGenerationSchema } from "@/lib/ai/schema";
 import { buildFallbackConversation } from "@/lib/ai/fallback";
+import { containsForbiddenContent } from "@/lib/ai/moderation";
 import type { ConversationTurn, Persona } from "@/types/domain";
 
 /**
@@ -49,15 +50,15 @@ function buildUserMessage(personaA: ConversationPersona, personaB: ConversationP
 // 生成後の検証(docs/05-ai-pipeline.md §4)
 // -----------------------------------------------------------------------------
 
-const FORBIDDEN_PATTERN =
-  /(株式会社|有限会社|合同会社|[一-龠々ぁ-ん]{1,6}部|[一-龠々ぁ-ん]{1,6}課|様)/u;
+// 禁止語(固有名詞らしき文字列)の判定は lib/ai/moderation.ts に切り出してある
+// (finding #10。`server-only` を import しないためテストから直接検証できる)。
 
 function hasForbiddenContent(turns: readonly ConversationTurn[]): boolean {
-  return turns.some((t) => FORBIDDEN_PATTERN.test(t.text));
+  return turns.some((t) => containsForbiddenContent(t.text));
 }
 
 function stripForbiddenTurns(turns: readonly ConversationTurn[]): ConversationTurn[] {
-  return turns.filter((t) => !FORBIDDEN_PATTERN.test(t.text));
+  return turns.filter((t) => !containsForbiddenContent(t.text));
 }
 
 /** 連続する同じ speaker のターンを統合し、先頭が 'a' になるよう揃える */

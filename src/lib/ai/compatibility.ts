@@ -4,6 +4,7 @@ import { AI_MODELS, generateStructured } from "@/lib/ai/client";
 import { SAVE_REPORT_TOOL, reportGenerationSchema } from "@/lib/ai/schema";
 import { buildFallbackReport } from "@/lib/ai/fallback";
 import { normalizeAxes } from "@/lib/matching/scoring";
+import { truncateWithEllipsis } from "@/lib/text";
 import type { ConversationTurn, Persona, ReportAxis } from "@/types/domain";
 
 /**
@@ -52,15 +53,10 @@ function buildUserMessage(
   return `${describePersona("A", personaA)}\n\n${describePersona("B", personaB)}\n\n${describeTranscript(turns)}`;
 }
 
+// finding #11: 短い総評を `padEnd(60, "。")` で埋めると「。。。。」のような
+// 不自然な連続が表示されていた。切り詰めのみ行い、パディングはしない。
 function clampSummary(text: string): string {
-  let result = text.trim();
-  if (result.length > 160) {
-    result = result.slice(0, 160);
-  }
-  if (result.length < 60) {
-    result = result.padEnd(60, "。");
-  }
-  return result;
+  return truncateWithEllipsis(text, 160);
 }
 
 export async function generateReport(

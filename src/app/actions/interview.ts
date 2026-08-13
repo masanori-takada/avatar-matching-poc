@@ -119,13 +119,16 @@ export async function completeInterview(): Promise<ActionResult> {
     return { ok: false, error: "まだ回答していない質問があります" };
   }
 
-  const { error } = await supabase
-    .from("profiles")
-    .update({ interview_completed_at: new Date().toISOString() })
-    .eq("id", profile.id);
+  // finding #2: profiles の UPDATE grant が (age_range, notifications_enabled)
+  // の列限定になった。interview_completed_at はユーザー自身が直接 UPDATE できる
+  // 列ではなくなったため、全設問回答済みをDB側でも再検証する
+  // complete_interview() RPC(SECURITY DEFINER)経由で設定する。これにより、
+  // このアプリ層の事前チェックを迂回しても(バグや将来の変更で)
+  // interview_completed_at を勝手に立てることができなくなる。
+  const { data: completed, error } = await supabase.rpc("complete_interview");
 
-  if (error) {
-    return { ok: false, error: "完了処理に失敗しました" };
+  if (error || !completed) {
+    return { ok: false, error: "まだ回答していない質問があります" };
   }
 
   // 注意(仕様からの逸脱): docs/04-api-contract.md §2 はここで同期的にペルソナ生成を
@@ -145,21 +148,18 @@ export async function resetInterview(): Promise<ActionResult> {
     return { ok: false, error: "この機能は本番環境では利用できません" };
   }
 
-  const profile = await requireProfile();
+  await requireProfile();
   const supabase = await createClient();
 
-  await supabase.from("interview_answers").delete().eq("profile_id", profile.id);
+  // finding #2 の副作用: interview_answers の DELETE は本人に許可されているが、
+  // personas の DELETE は service_role 専任、profiles の UPDATE も列限定
+  // (age_range, notifications_enabled のみ)になったため、ユーザー自身の
+  // client からは interview_completed_at を直接リセットできない。
+  // reset_interview_dev() RPC(SECURITY DEFINER、auth.uid() 自身の行のみ操作)
+  // にまとめて委ねる。
+  const { data: ok, error } = await supabase.rpc("reset_interview_dev");
 
-  // 注意(仕様からの逸脱): `personas` の DELETE は service_role 専任のため、
-  // 本タスクの admin クライアント使用制限の下ではここから削除できない。
-  // 開発用リセットのため、回答と完了フラグのみを初期化する。
-
-  const { error } = await supabase
-    .from("profiles")
-    .update({ interview_completed_at: null })
-    .eq("id", profile.id);
-
-  if (error) {
+  if (error || !ok) {
     return { ok: false, error: "リセットに失敗しました" };
   }
 

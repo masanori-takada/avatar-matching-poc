@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/IconSprite";
 import { Steps } from "@/components/ui/Steps";
 import { COPY } from "@/lib/constants";
-import { currentStepIndex } from "@/lib/status";
+import { currentStepIndex, loadHomeState } from "@/lib/status";
 
 /**
  * 認証Cookieに依存するため、静的プリレンダリングの対象から外す。
@@ -19,29 +19,16 @@ export default async function WaitingPage() {
   const profile = await requireInterviewed();
   const supabase = await createClient();
 
-  const [{ count: unreadCount }, { count: visibleMatchCount }, { data: decisionRows }] =
-    await Promise.all([
-      supabase
-        .from("notifications")
-        .select("id", { count: "exact", head: true })
-        .eq("profile_id", profile.id)
-        .is("read_at", null),
-      supabase
-        .from("matches")
-        .select("id", { count: "exact", head: true })
-        .or(`profile_a_id.eq.${profile.id},profile_b_id.eq.${profile.id}`),
-      supabase
-        .from("match_decisions")
-        .select("decision")
-        .eq("profile_id", profile.id)
-        .order("decided_at", { ascending: false })
-        .limit(1),
-    ]);
+  const [{ count: unreadCount }, state] = await Promise.all([
+    supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("profile_id", profile.id)
+      .is("read_at", null),
+    loadHomeState(supabase, profile.id),
+  ]);
 
-  const hasVisibleMatch = (visibleMatchCount ?? 0) > 0;
-  const latestDecision = decisionRows?.[0]?.decision ?? null;
-
-  const stepIndex = currentStepIndex({ latestDecision, hasVisibleMatch, latestMatchId: null });
+  const stepIndex = currentStepIndex(state);
 
   return (
     <AppShell unreadCount={unreadCount ?? 0}>

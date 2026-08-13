@@ -7,7 +7,13 @@ import { Icon } from "@/components/ui/IconSprite";
 import { Steps } from "@/components/ui/Steps";
 import { SectionTitle } from "@/components/ui/SectionTitle";
 import { COPY } from "@/lib/constants";
-import { currentStepIndex, statusActionLabel, statusTargetHref, statusText } from "@/lib/status";
+import {
+  currentStepIndex,
+  loadHomeState,
+  statusActionLabel,
+  statusTargetHref,
+  statusText,
+} from "@/lib/status";
 import type { NotificationKind } from "@/types/domain";
 
 /**
@@ -38,7 +44,7 @@ export default async function HomePage() {
   const profile = await requireInterviewed();
   const supabase = await createClient();
 
-  const [{ data: notifications }, { data: decisionRows }, { data: matchRows }] = await Promise.all([
+  const [{ data: notifications }, { count: unreadCount }, state] = await Promise.all([
     supabase
       .from("notifications")
       .select("id, kind, title, body, match_id, read_at, created_at")
@@ -46,30 +52,14 @@ export default async function HomePage() {
       .order("created_at", { ascending: false })
       .limit(2),
     supabase
-      .from("match_decisions")
-      .select("decision")
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
       .eq("profile_id", profile.id)
-      .order("decided_at", { ascending: false })
-      .limit(1),
-    supabase
-      .from("matches")
-      .select("id, created_at")
-      .or(`profile_a_id.eq.${profile.id},profile_b_id.eq.${profile.id}`)
-      .order("created_at", { ascending: false })
-      .limit(1),
+      .is("read_at", null),
+    loadHomeState(supabase, profile.id),
   ]);
 
-  const { count: unreadCount } = await supabase
-    .from("notifications")
-    .select("id", { count: "exact", head: true })
-    .eq("profile_id", profile.id)
-    .is("read_at", null);
-
-  const hasVisibleMatch = (matchRows?.length ?? 0) > 0;
-  const latestMatchId = matchRows?.[0]?.id ?? null;
-  const latestDecision = decisionRows?.[0]?.decision ?? null;
-
-  const state = { latestDecision, hasVisibleMatch, latestMatchId };
+  const { hasVisibleMatch, latestMatchId } = state;
   const stepIndex = currentStepIndex(state);
 
   const homeMenu = [

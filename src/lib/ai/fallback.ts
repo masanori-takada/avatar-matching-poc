@@ -11,6 +11,7 @@ import type {
 } from "@/types/domain";
 import type { InterviewQuestionKind } from "@/types/database";
 import { AXIS_DEFINITIONS } from "@/lib/constants";
+import { truncateWithEllipsis } from "@/lib/text";
 
 /**
  * ANTHROPIC_API_KEY 未設定・API失敗時の決定的フォールバック(docs/05-ai-pipeline.md §3〜5, NFR-4)。
@@ -161,21 +162,15 @@ export function buildFallbackPersona(answers: readonly FallbackAnswerInput[]): F
     FUTURE_ORIENTATION_TEXT[future_orientation] +
     keywordsClause;
 
-  if (summary.length > 200) {
-    summary = summary.slice(0, 200);
-  }
-  if (summary.length < 80) {
-    summary = summary.padEnd(80, "。");
-  }
+  // finding #11 と同じ理由で下限のパディングは行わない。句点で埋めると
+  // 「。。。。」が会話生成プロンプトにそのまま入り、出力を汚す。
+  // 上限の切り詰めのみ行う。
+  summary = truncateWithEllipsis(summary, 200);
 
-  let speakingStyle =
-    CONVERSATION_STYLE_SPEAKING[conversation_style] + SOCIAL_ENERGY_SPEAKING[social_energy];
-  if (speakingStyle.length > 80) {
-    speakingStyle = speakingStyle.slice(0, 80);
-  }
-  if (speakingStyle.length < 20) {
-    speakingStyle = speakingStyle.padEnd(20, "。");
-  }
+  const speakingStyle = truncateWithEllipsis(
+    CONVERSATION_STYLE_SPEAKING[conversation_style] + SOCIAL_ENERGY_SPEAKING[social_energy],
+    80,
+  );
 
   return { summary, traits, speakingStyle };
 }
@@ -303,15 +298,10 @@ const SUMMARY_TEMPLATES: Record<"high" | "mid" | "low", string> = {
   low: "重なりは限定的でしたが、会話を通じて少しずつ理解を深められそうな余地が見られました。",
 };
 
+// finding #11: 短い総評を `padEnd(60, "。")` で埋めると「。。。。」のような
+// 不自然な連続が表示されていた。切り詰めのみ行い、パディングはしない。
 function clampSummaryLength(text: string): string {
-  let result = text;
-  if (result.length > 160) {
-    result = result.slice(0, 160);
-  }
-  if (result.length < 60) {
-    result = result.padEnd(60, "。");
-  }
-  return result;
+  return truncateWithEllipsis(text, 160);
 }
 
 /**

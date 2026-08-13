@@ -104,6 +104,11 @@ export interface Database {
           is_active?: boolean;
           created_at?: string;
         };
+        // 注意: `authenticated` の実際の UPDATE 権限は列限定
+        // (`age_range`, `notifications_enabled` のみ。finding #2)。
+        // `interview_completed_at` は complete_interview() RPC 経由でのみ、
+        // `organization_id` / `anonymous_id` は変更不可。この型は DB 上の
+        // 全カラムの形を表すのみで、実行時の権限は RLS 側の grant が決める。
         Update: {
           id?: string;
           organization_id?: string;
@@ -422,9 +427,32 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      // finding #7: 招待コード検証と実名(identities)登録を1トランザクションに
+      // まとめた。profiles だけ作られて identities が欠けるという、ユーザー
+      // 自身では修復不能な壊れた状態を防ぐため。
       consume_invite_code: {
-        Args: { p_code: string; p_user_id: string };
+        Args: {
+          p_code: string;
+          p_user_id: string;
+          p_full_name: string;
+          p_company_name: string;
+          p_department?: string | null;
+          p_message?: string | null;
+        };
         Returns: { organization_id: string }[];
+      };
+      // finding #2: interview_completed_at は profiles の列限定 UPDATE 権限
+      // (age_range, notifications_enabled のみ)からは変更できないため、この
+      // RPC 経由でのみ完了処理を行う。全 is_active 設問への回答済みを検証する。
+      complete_interview: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
+      // 開発・展示用リセット(NODE_ENV !== 'production' のみ呼び出し可能な
+      // Server Action から使う)。auth.uid() 自身の行のみ操作する。
+      reset_interview_dev: {
+        Args: Record<string, never>;
+        Returns: boolean;
       };
       finalize_match_if_mutual: {
         Args: { p_match_id: string };

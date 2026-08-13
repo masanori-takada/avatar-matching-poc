@@ -4,7 +4,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Card } from "@/components/ui/Card";
 import { SectionTitle } from "@/components/ui/SectionTitle";
 import { STEPS, COPY } from "@/lib/constants";
-import { currentStepIndex } from "@/lib/status";
+import { currentStepIndex, loadHomeState } from "@/lib/status";
 
 /**
  * 認証Cookieに依存するため、静的プリレンダリングの対象から外す。
@@ -19,39 +19,23 @@ export default async function MypagePage() {
   const profile = await requireInterviewed();
   const supabase = await createClient();
 
-  const [
-    { count: unreadCount },
-    { data: decisionRows },
-    { count: visibleMatchCount },
-    { data: questionRows },
-    { data: answerRows },
-  ] = await Promise.all([
-    supabase
-      .from("notifications")
-      .select("id", { count: "exact", head: true })
-      .eq("profile_id", profile.id)
-      .is("read_at", null),
-    supabase
-      .from("match_decisions")
-      .select("decision")
-      .eq("profile_id", profile.id)
-      .order("decided_at", { ascending: false })
-      .limit(1),
-    supabase
-      .from("matches")
-      .select("id", { count: "exact", head: true })
-      .or(`profile_a_id.eq.${profile.id},profile_b_id.eq.${profile.id}`),
-    supabase
-      .from("interview_questions")
-      .select("id, text, sort_order")
-      .eq("is_active", true)
-      .order("sort_order", { ascending: true }),
-    supabase.from("interview_answers").select("question_id, answer").eq("profile_id", profile.id),
-  ]);
+  const [{ count: unreadCount }, state, { data: questionRows }, { data: answerRows }] =
+    await Promise.all([
+      supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("profile_id", profile.id)
+        .is("read_at", null),
+      loadHomeState(supabase, profile.id),
+      supabase
+        .from("interview_questions")
+        .select("id, text, sort_order")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true }),
+      supabase.from("interview_answers").select("question_id, answer").eq("profile_id", profile.id),
+    ]);
 
-  const hasVisibleMatch = (visibleMatchCount ?? 0) > 0;
-  const latestDecision = decisionRows?.[0]?.decision ?? null;
-  const stepIndex = currentStepIndex({ latestDecision, hasVisibleMatch, latestMatchId: null });
+  const stepIndex = currentStepIndex(state);
   const stepLabel = STEPS[stepIndex]?.label ?? "";
 
   const answerByQuestionId = new Map((answerRows ?? []).map((a) => [a.question_id, a.answer]));

@@ -37,9 +37,17 @@ grant usage on schema public to anon, authenticated;
 grant select on public.organizations to authenticated;
 grant select on public.interview_questions to authenticated;
 
-grant select, insert, update, delete on public.profiles to authenticated;
+-- profiles: 列限定の UPDATE(finding #2)。interview_completed_at /
+-- organization_id / anonymous_id はテーブル全体の UPDATE 権限からは
+-- 変更できない(interview_completed_at は complete_interview() RPC 経由のみ)。
+grant select, insert, delete on public.profiles to authenticated;
+grant update (age_range, notifications_enabled) on public.profiles to authenticated;
+
 grant select, insert, update on public.identities to authenticated;
-grant select, insert, delete on public.interview_answers to authenticated;
+-- interview_answers: UPDATE を追加(finding #4)。submitAnswer() は
+-- upsert(onConflict: 'profile_id,question_id') で再回答(resume)を想定しており、
+-- UPDATE grant/policy が無いと upsert の UPDATE 経路が常に失敗していた。
+grant select, insert, update, delete on public.interview_answers to authenticated;
 grant select on public.personas to authenticated;
 grant select on public.matches to authenticated;
 grant select on public.avatar_conversations to authenticated;
@@ -48,6 +56,36 @@ grant select, insert on public.match_decisions to authenticated;
 grant select on public.meeting_slots to authenticated;
 grant select, insert, update on public.slot_selections to authenticated;
 grant select, update, delete on public.notifications to authenticated;
+
+-- =============================================================================
+-- SECURITY DEFINER 関数の EXECUTE 権限(finding #1)
+-- Postgres は関数作成時、既定で PUBLIC に EXECUTE を与える。SECURITY DEFINER の
+-- 関数でこれを放置すると、authenticated な任意のユーザーが PostgREST 経由で
+-- rpc 呼び出しでき、意図しない権限昇格になる。ここで全関数を明示的に
+-- revoke してから、実際に必要な範囲だけ grant し直す。
+-- =============================================================================
+
+revoke all on function public.consume_invite_code(text, uuid, text, text, text, text)
+  from public, anon, authenticated;
+grant execute on function public.consume_invite_code(text, uuid, text, text, text, text)
+  to service_role;
+
+revoke all on function public.complete_interview() from public, anon;
+grant execute on function public.complete_interview() to authenticated, service_role;
+
+revoke all on function public.reset_interview_dev() from public, anon;
+grant execute on function public.reset_interview_dev() to authenticated, service_role;
+
+revoke all on function public.generate_slots() from public, anon, authenticated;
+grant execute on function public.generate_slots() to service_role;
+
+-- finalize_match_if_mutual: decideMatch() Server Action がユーザー自身の
+-- client から rpc 呼び出しするため authenticated に必要(docs/04-api-contract.md
+-- §4)。関数内部で auth.uid() が当事者本人かを検査するガードを追加済み
+-- (20260813000001_schema.sql)。ガードが無ければ、当事者でない任意の
+-- ユーザーが他人のマッチを勝手に確定させられてしまうところだった。
+revoke all on function public.finalize_match_if_mutual(uuid) from public, anon;
+grant execute on function public.finalize_match_if_mutual(uuid) to authenticated, service_role;
 
 -- =============================================================================
 -- SECURITY DEFINER ヘルパー(docs/03-data-model.md §3)
@@ -109,6 +147,19 @@ as $$
   );
 $$;
 
+-- is_match_participant / is_mutual_accept / is_revealed_partner は RLS
+-- ポリシーの using/with check 句から呼ばれるため、ポリシーを評価する
+-- authenticated ロール自身に EXECUTE が必要(finding #1 の監査対象)。
+-- service_role はテーブルアクセス自体が RLS を迂回するため不要。
+revoke all on function public.is_match_participant(uuid) from public, anon;
+grant execute on function public.is_match_participant(uuid) to authenticated;
+
+revoke all on function public.is_mutual_accept(uuid) from public, anon;
+grant execute on function public.is_mutual_accept(uuid) to authenticated;
+
+revoke all on function public.is_revealed_partner(uuid) from public, anon;
+grant execute on function public.is_revealed_partner(uuid) to authenticated;
+
 -- =============================================================================
 -- 4.1 参加者本人のデータ
 -- =============================================================================
@@ -151,6 +202,15 @@ create policy interview_answers_insert_self on public.interview_answers
 create policy interview_answers_delete_self on public.interview_answers
   for delete to authenticated
   using (profile_id = auth.uid());
+
+-- interview_answers UPDATE(finding #4): submitAnswer() は
+-- upsert(onConflict: 'profile_id,question_id') を使い、既回答の設問への
+-- 再回答(FR-2.4 の再開フロー)を UPDATE 経路に頼る。回答順の強制は
+-- アプリ層(submitAnswer)が担うため、ここでは自分の行であることのみ検査する。
+create policy interview_answers_update_self on public.interview_answers
+  for update to authenticated
+  using (profile_id = auth.uid())
+  with check (profile_id = auth.uid());
 
 -- personas: SELECT のみ(生成は service_role のバッチ専任)
 create policy personas_select_self on public.personas
@@ -250,6 +310,21 @@ create policy slot_selections_upsert_self on public.slot_selections
                 where s.id = slot_id and s.match_id = slot_selections.match_id)
   );
 
+-- slot_selections UPDATE(finding #3): upsert の UPDATE 経路が INSERT ポリシー
+-- と同じ検査(相互accept成立・slot がこのマッチに属する)を素通りしていた
+-- ため、別マッチの slot を書き込んで agreed を偽装できてしまっていた。
+-- INSERT ポリシーの with check を using/with check の両方にそのまま複製する。
 create policy slot_selections_update_self on public.slot_selections
   for update to authenticated
-  using (profile_id = auth.uid()) with check (profile_id = auth.uid());
+  using (
+    profile_id = auth.uid()
+    and public.is_mutual_accept(match_id)
+    and exists (select 1 from public.meeting_slots s
+                where s.id = slot_id and s.match_id = slot_selections.match_id)
+  )
+  with check (
+    profile_id = auth.uid()
+    and public.is_mutual_accept(match_id)
+    and exists (select 1 from public.meeting_slots s
+                where s.id = slot_id and s.match_id = slot_selections.match_id)
+  );

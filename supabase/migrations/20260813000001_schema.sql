@@ -193,6 +193,13 @@ create table public.notifications (
 
 create index on public.notifications (profile_id, read_at);
 
+-- notified_at 通知の冪等性(docs/05-ai-pipeline.md §6 手順5)。
+-- notifyQualified はステータス更新前に通知行を作るため、途中で失敗して
+-- 再実行されると同じ (profile_id, match_id, kind) の行が重複しうる。
+-- unique 制約 + upsert(ignoreDuplicates) で、実行順序に関わらず冪等にする。
+create unique index notifications_profile_match_kind_unique
+  on public.notifications (profile_id, match_id, kind);
+
 -- =============================================================================
 -- 6. トリガ・関数(DB側)
 -- =============================================================================
@@ -256,11 +263,25 @@ create trigger profiles_assign_anonymous_id
   for each row
   execute function public.assign_anonymous_id();
 
--- consume_invite_code(): 招待コードの検証と profiles 作成 --------------------
+-- consume_invite_code(): 招待コードの検証 + profiles/identities 作成 ---------
 -- SECURITY DEFINER。行ロック(for update)を取り、used_count < max_uses と
 -- expires_at を同一トランザクションで検査する。Server Action は service_role で
--- rpc 呼び出しするだけにする(docs/03-data-model.md §6, §4.1)
-create function public.consume_invite_code(p_code text, p_user_id uuid)
+-- rpc 呼び出しするだけにする(docs/03-data-model.md §6, §4.1)。
+--
+-- 実名(identities)も同一トランザクションで INSERT する(finding #7):
+-- profiles だけ作られて identities の INSERT が失敗すると、ユーザー自身では
+-- 修復できない(identities への INSERT は自分の行にしかできず、既存の profiles
+-- 行がある場合はこの関数自体が ALREADY_REGISTERED で弾くため)壊れた状態が残り、
+-- 相互accept後の相手の開示ページも壊れる。1関数内でまとめて行うことで、
+-- 途中失敗時は関数全体がロールバックし profiles も作られない。
+create function public.consume_invite_code(
+  p_code text,
+  p_user_id uuid,
+  p_full_name text,
+  p_company_name text,
+  p_department text default null,
+  p_message text default null
+)
 returns table (organization_id uuid)
 language plpgsql
 security definer
@@ -269,9 +290,17 @@ as $$
 declare
   v_code record;
   v_normalized text := upper(btrim(p_code));
+  v_full_name text := btrim(coalesce(p_full_name, ''));
+  v_company_name text := btrim(coalesce(p_company_name, ''));
+  v_department text := nullif(btrim(coalesce(p_department, '')), '');
+  v_message text := nullif(btrim(coalesce(p_message, '')), '');
 begin
   if v_normalized = '' then
     raise exception 'INVALID_CODE' using errcode = 'P0001';
+  end if;
+
+  if v_full_name = '' or v_company_name = '' then
+    raise exception 'INVALID_IDENTITY' using errcode = 'P0005';
   end if;
 
   select * into v_code
@@ -302,7 +331,84 @@ begin
   insert into public.profiles (id, organization_id)
   values (p_user_id, v_code.organization_id);
 
+  insert into public.identities (profile_id, full_name, company_name, department, message)
+  values (p_user_id, v_full_name, v_company_name, v_department, v_message);
+
   return query select v_code.organization_id;
+end;
+$$;
+
+-- complete_interview(): 全設問回答済みを確認したうえで interview_completed_at
+-- を設定する。SECURITY DEFINER。profiles への直接 UPDATE 権限が
+-- (age_range, notifications_enabled) の列限定になった(finding #2)ため、
+-- interview_completed_at はこの RPC 経由でのみ更新できる。
+-- 冪等: 既に完了済みでも再検証にさえ通れば true を返す(状態は変えない)。
+create function public.complete_interview()
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_catalog
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_all_answered boolean;
+begin
+  if v_uid is null then
+    return false;
+  end if;
+
+  select not exists (
+    select 1
+    from public.interview_questions q
+    where q.is_active = true
+      and not exists (
+        select 1 from public.interview_answers a
+        where a.profile_id = v_uid and a.question_id = q.id
+      )
+  )
+  and exists (select 1 from public.interview_questions q2 where q2.is_active = true)
+  into v_all_answered;
+
+  if not v_all_answered then
+    return false;
+  end if;
+
+  update public.profiles
+  set interview_completed_at = now()
+  where id = v_uid and interview_completed_at is null;
+
+  return true;
+end;
+$$;
+
+-- reset_interview_dev(): 開発・展示用のリセット。SECURITY DEFINER。
+-- interview_answers の DELETE は本人に許可されているが、personas の DELETE は
+-- service_role 専任(docs/03-data-model.md §4.1)であり、profiles の UPDATE も
+-- (age_range, notifications_enabled) 列限定になったため、本人の client からは
+-- 直接リセットできない。この関数は呼び出し元(auth.uid())自身の行のみを操作する。
+-- 呼び出し側(resetInterview() Server Action)で NODE_ENV !== 'production' を
+-- 確認してから呼ぶこと。
+create function public.reset_interview_dev()
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_catalog
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    return false;
+  end if;
+
+  delete from public.interview_answers where profile_id = v_uid;
+  delete from public.personas where profile_id = v_uid;
+
+  update public.profiles
+  set interview_completed_at = null
+  where id = v_uid;
+
+  return true;
 end;
 $$;
 
@@ -338,7 +444,14 @@ end;
 $$;
 
 -- finalize_match_if_mutual(): 相互accept時に mutual 確定 + 枠生成 + 通知作成 -----
--- SECURITY DEFINER・冪等。docs/04-api-contract.md §4 の SQL 概略に準拠
+-- SECURITY DEFINER・冪等。docs/04-api-contract.md §4 の SQL 概略に準拠。
+--
+-- decideMatch() Server Action は(service_role ではなく)ユーザー自身の
+-- client からこの関数を rpc 呼び出しする(match_decisions の INSERT 自体は
+-- RLS で当事者チェックされるが、finalize はそれとは独立に呼べてしまうため)。
+-- よってこの関数は authenticated に EXECUTE を許可しつつ、内部で
+-- 呼び出し元(auth.uid())がこのマッチの当事者本人であることを検査する
+-- (finding #1)。当事者でなければ何もせず false を返す。
 create function public.finalize_match_if_mutual(p_match_id uuid)
 returns boolean
 language plpgsql
@@ -356,6 +469,10 @@ begin
   for update;
 
   if v_a is null then
+    return false;
+  end if;
+
+  if auth.uid() is null or (auth.uid() <> v_a and auth.uid() <> v_b) then
     return false;
   end if;
 
