@@ -451,7 +451,7 @@ export interface Database {
       // 開発・展示用リセット(NODE_ENV !== 'production' のみ呼び出し可能な
       // Server Action から使う)。auth.uid() 自身の行のみ操作する。
       reset_interview_dev: {
-        Args: Record<string, never>;
+        Args: { p_profile_id: string };
         Returns: boolean;
       };
       finalize_match_if_mutual: {

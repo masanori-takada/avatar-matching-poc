@@ -208,6 +208,7 @@ create unique index notifications_profile_match_kind_unique
 create function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = public, pg_catalog
 as $$
 begin
   new.updated_at = now();
@@ -224,6 +225,7 @@ create trigger identities_set_updated_at
 create function public.assign_anonymous_id()
 returns trigger
 language plpgsql
+set search_path = public, pg_catalog
 as $$
 declare
   v_prefix text;
@@ -388,25 +390,31 @@ $$;
 -- 直接リセットできない。この関数は呼び出し元(auth.uid())自身の行のみを操作する。
 -- 呼び出し側(resetInterview() Server Action)で NODE_ENV !== 'production' を
 -- 確認してから呼ぶこと。
-create function public.reset_interview_dev()
+-- service_role 専任のため auth.uid() は使えない(service_role 経由の呼び出しでは
+-- null になる)。対象の profile_id を明示的に受け取る。呼び出し元の
+-- resetInterview() Server Action が requireProfile() で本人を確定させてから
+-- 自分の id のみを渡す。
+create function public.reset_interview_dev(p_profile_id uuid)
 returns boolean
 language plpgsql
 security definer
 set search_path = public, pg_catalog
 as $$
-declare
-  v_uid uuid := auth.uid();
 begin
-  if v_uid is null then
+  if p_profile_id is null then
     return false;
   end if;
 
-  delete from public.interview_answers where profile_id = v_uid;
-  delete from public.personas where profile_id = v_uid;
+  if not exists (select 1 from public.profiles where id = p_profile_id) then
+    return false;
+  end if;
+
+  delete from public.interview_answers where profile_id = p_profile_id;
+  delete from public.personas where profile_id = p_profile_id;
 
   update public.profiles
   set interview_completed_at = null
-  where id = v_uid;
+  where id = p_profile_id;
 
   return true;
 end;
@@ -418,6 +426,7 @@ create function public.generate_slots()
 returns table (starts_at timestamptz, ends_at timestamptz, place text, ord integer)
 language plpgsql
 stable
+set search_path = public, pg_catalog
 as $$
 declare
   v_day date := current_date;

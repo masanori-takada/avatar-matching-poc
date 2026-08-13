@@ -2,6 +2,7 @@
 
 import { requireProfile } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { ActionResult } from "@/types/domain";
 import type { Json } from "@/types/database";
 
@@ -148,16 +149,23 @@ export async function resetInterview(): Promise<ActionResult> {
     return { ok: false, error: "この機能は本番環境では利用できません" };
   }
 
-  await requireProfile();
-  const supabase = await createClient();
+  const profile = await requireProfile();
 
   // finding #2 の副作用: interview_answers の DELETE は本人に許可されているが、
   // personas の DELETE は service_role 専任、profiles の UPDATE も列限定
   // (age_range, notifications_enabled のみ)になったため、ユーザー自身の
   // client からは interview_completed_at を直接リセットできない。
-  // reset_interview_dev() RPC(SECURITY DEFINER、auth.uid() 自身の行のみ操作)
-  // にまとめて委ねる。
-  const { data: ok, error } = await supabase.rpc("reset_interview_dev");
+  //
+  // この RPC を authenticated に開くと、上の NODE_ENV ガードを迂回して
+  // /rest/v1/rpc/reset_interview_dev を本番でも直接叩けてしまい、ガードが
+  // 守っているという錯覚だけが残る(Supabase security advisor の
+  // authenticated_security_definer_function_executable で検出)。
+  // よって RPC は service_role 専任とし、ここでのみ admin クライアントを使う。
+  // 対象は requireProfile() で確定した呼び出し元自身の id に限定する。
+  const admin = createAdminClient();
+  const { data: ok, error } = await admin.rpc("reset_interview_dev", {
+    p_profile_id: profile.id,
+  });
 
   if (error || !ok) {
     return { ok: false, error: "リセットに失敗しました" };

@@ -73,8 +73,14 @@ grant execute on function public.consume_invite_code(text, uuid, text, text, tex
 revoke all on function public.complete_interview() from public, anon;
 grant execute on function public.complete_interview() to authenticated, service_role;
 
-revoke all on function public.reset_interview_dev() from public, anon;
-grant execute on function public.reset_interview_dev() to authenticated, service_role;
+-- reset_interview_dev: 開発・展示用のリセット。authenticated には与えない。
+-- 与えてしまうと、resetInterview() Server Action 側の NODE_ENV ガードを
+-- 迂回して /rest/v1/rpc/reset_interview_dev を直接叩けてしまい、ガードが
+-- 守っているという錯覚だけが残る(影響は呼び出し元自身のデータに限られるが、
+-- 本番で開くべき面ではない)。service_role 専任にし、Server Action 側も
+-- admin クライアント経由で呼ぶ(NODE_ENV !== 'production' のときのみ)。
+revoke all on function public.reset_interview_dev(uuid) from public, anon, authenticated;
+grant execute on function public.reset_interview_dev(uuid) to service_role;
 
 revoke all on function public.generate_slots() from public, anon, authenticated;
 grant execute on function public.generate_slots() to service_role;
